@@ -49,6 +49,7 @@ import (
 
 	// +kubebuilder:scaffold:imports
 
+	appsv1 "github.com/apecloud/kubeblocks/apis/apps/v1"
 	appsv1alpha1 "github.com/apecloud/kubeblocks/apis/apps/v1alpha1"
 	appsv1beta1 "github.com/apecloud/kubeblocks/apis/apps/v1beta1"
 	dpv1alpha1 "github.com/apecloud/kubeblocks/apis/dataprotection/v1alpha1"
@@ -112,6 +113,7 @@ func init() {
 	utilruntime.Must(legacy.AddToScheme(scheme))
 	utilruntime.Must(apiextv1.AddToScheme(scheme))
 	utilruntime.Must(experimentalv1alpha1.AddToScheme(scheme))
+	utilruntime.Must(appsv1.AddToScheme(scheme))
 	// +kubebuilder:scaffold:scheme
 
 	viper.SetConfigName("config")                          // name of config file (without extension)
@@ -570,6 +572,19 @@ func main() {
 
 		if err = (&appsv1beta1.ConfigConstraint{}).SetupWebhookWithManager(mgr); err != nil {
 			setupLog.Error(err, "unable to create webhook", "webhook", "ConfigConstraint")
+			os.Exit(1)
+		}
+
+		if err = (&appsv1.ClusterDefinition{}).SetupWebhookWithManager(mgr); err != nil {
+			setupLog.Error(err, "unable to create webhook", "webhook", "ClusterDefinition")
+			os.Exit(1)
+		}
+		if err = (&appsv1.ComponentDefinition{}).SetupWebhookWithManager(mgr); err != nil {
+			setupLog.Error(err, "unable to create webhook", "webhook", "ComponentDefinition")
+			os.Exit(1)
+		}
+		if err = (&appsv1.ComponentVersion{}).SetupWebhookWithManager(mgr); err != nil {
+			setupLog.Error(err, "unable to create webhook", "webhook", "ComponentVersion")
 			os.Exit(1)
 		}
 	}

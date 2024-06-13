@@ -10,6 +10,66 @@ webhooks:
     service:
       name: webhook-service
       namespace: system
+      path: /mutate-apps-kubeblocks-io-v1-clusterdefinition
+  failurePolicy: Fail
+  name: mclusterdefinition.kb.io
+  rules:
+  - apiGroups:
+    - apps.kubeblocks.io
+    apiVersions:
+    - v1
+    operations:
+    - CREATE
+    - UPDATE
+    resources:
+    - clusterdefinitions
+  sideEffects: None
+- admissionReviewVersions:
+  - v1
+  clientConfig:
+    service:
+      name: webhook-service
+      namespace: system
+      path: /mutate-apps-kubeblocks-io-v1-componentdefinition
+  failurePolicy: Fail
+  name: mcomponentdefinition.kb.io
+  rules:
+  - apiGroups:
+    - apps.kubeblocks.io
+    apiVersions:
+    - v1
+    operations:
+    - CREATE
+    - UPDATE
+    resources:
+    - componentdefinitions
+  sideEffects: None
+- admissionReviewVersions:
+  - v1
+  clientConfig:
+    service:
+      name: webhook-service
+      namespace: system
+      path: /mutate-apps-kubeblocks-io-v1-componentversion
+  failurePolicy: Fail
+  name: mcomponentversion.kb.io
+  rules:
+  - apiGroups:
+    - apps.kubeblocks.io
+    apiVersions:
+    - v1
+    operations:
+    - CREATE
+    - UPDATE
+    resources:
+    - componentversions
+  sideEffects: None
+- admissionReviewVersions:
+  - v1
+  clientConfig:
+    service:
+      name: webhook-service
+      namespace: system
       path: /mutate-workloads-kubeblocks-io-v1alpha1-instanceset
   failurePolicy: Fail
   name: minstanceset.kb.io
@@ -130,6 +190,66 @@ kind: ValidatingWebhookConfiguration
 metadata:
   name: validating-webhook-configuration
 webhooks:
+- admissionReviewVersions:
+  - v1
+  clientConfig:
+    service:
+      name: webhook-service
+      namespace: system
+      path: /validate-apps-kubeblocks-io-v1-clusterdefinition
+  failurePolicy: Fail
+  name: vclusterdefinition.kb.io
+  rules:
+  - apiGroups:
+    - apps.kubeblocks.io
+    apiVersions:
+    - v1
+    operations:
+    - CREATE
+    - UPDATE
+    resources:
+    - clusterdefinitions
+  sideEffects: None
+- admissionReviewVersions:
+  - v1
+  clientConfig:
+    service:
+      name: webhook-service
+      namespace: system
+      path: /validate-apps-kubeblocks-io-v1-componentdefinition
+  failurePolicy: Fail
+  name: vcomponentdefinition.kb.io
+  rules:
+  - apiGroups:
+    - apps.kubeblocks.io
+    apiVersions:
+    - v1
+    operations:
+    - CREATE
+    - UPDATE
+    resources:
+    - componentdefinitions
+  sideEffects: None
+- admissionReviewVersions:
+  - v1
+  clientConfig:
+    service:
+      name: webhook-service
+      namespace: system
+      path: /validate-apps-kubeblocks-io-v1-componentversion
+  failurePolicy: Fail
+  name: vcomponentversion.kb.io
+  rules:
+  - apiGroups:
+    - apps.kubeblocks.io
+    apiVersions:
+    - v1
+    operations:
+    - CREATE
+    - UPDATE
+    resources:
+    - componentversions
+  sideEffects: None
 - admissionReviewVersions:
   - v1
   clientConfig:
