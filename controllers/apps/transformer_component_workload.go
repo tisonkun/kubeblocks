@@ -22,6 +22,7 @@ package apps
 import (
 	"context"
 	"fmt"
+	"github.com/pkg/errors"
 	"reflect"
 	"strings"
 
@@ -579,10 +580,8 @@ func (r *componentWorkloadOps) leaveMember4ScaleIn() error {
 	if err != nil {
 		return err
 	}
+
 	isLeader := func(pod *corev1.Pod) bool {
-		if pod == nil || len(pod.Labels) == 0 {
-			return false
-		}
 		roleName, ok := pod.Labels[constant.RoleLabelKey]
 		if !ok {
 			return false
@@ -597,6 +596,10 @@ func (r *componentWorkloadOps) leaveMember4ScaleIn() error {
 	}
 
 	tryToSwitchover := func(lorryCli lorry.Client, pod *corev1.Pod) error {
+		if pod == nil || len(pod.Labels) == 0 {
+			return nil
+		}
+
 		// if pod is not leader/primary, no need to switchover
 		if !isLeader(pod) {
 			return nil
@@ -630,6 +633,7 @@ func (r *componentWorkloadOps) leaveMember4ScaleIn() error {
 		}
 		podsToMemberLeave = append(podsToMemberLeave, pod)
 	}
+	tryLeaveMemberByOtherPods := false
 	for _, pod := range podsToMemberLeave {
 		if !(isLeader(pod) || // if the pod is leader, it needs to call switchover
 			(r.synthesizeComp.LifecycleActions != nil && r.synthesizeComp.LifecycleActions.MemberLeave != nil)) { // if the memberLeave action is defined, it needs to call it
@@ -637,16 +641,16 @@ func (r *componentWorkloadOps) leaveMember4ScaleIn() error {
 		}
 
 		lorryCli, err1 := lorry.NewClient(*pod)
-		if err1 != nil {
-			if err == nil {
-				err = err1
+		if err1 != nil || intctrlutil.IsNil(lorryCli) {
+			// if the pod is leader, but the lorry client can't be created,
+			// it means we can't switch over, so we return the error right here
+			if isLeader(pod) {
+				return err1
 			}
-			continue
-		}
 
-		if intctrlutil.IsNil(lorryCli) {
-			// no lorry in the pod
-			continue
+			// use other pods to leave member
+			tryLeaveMemberByOtherPods = true
+			r.reqCtx.Log.Info(fmt.Sprintf("leaving pod %s by lorry, err occurs when NewClient: %v, try to leave member by other pods", pod.Name, err1.Error()))
 		}
 
 		// switchover if the leaving pod is leader
@@ -654,68 +658,56 @@ func (r *componentWorkloadOps) leaveMember4ScaleIn() error {
 			return switchoverErr
 		}
 
-		if err2 := lorryCli.LeaveMember(r.reqCtx.Ctx, nil); err2 != nil {
-			// For the purpose of upgrade compatibility, if the version of Lorry is 0.7 and
-			// the version of KB is upgraded to 0.8 or newer, lorry client will return an NotImplemented error,
-			// in this case, here just ignore it.
-			if err2 == lorry.NotImplemented {
-				r.reqCtx.Log.Info("lorry leave member api is not implemented")
-			} else if unableToConnect(err2) {
-				r.reqCtx.Log.Info(fmt.Sprintf("when leaving pod %s by lorry, can not connect lorry on pod %s, try to leave member by other pods", pod.Name, pod.Name))
-				err3 := r.leaveMemberByOtherPods(desiredPods, pod)
-				if err == nil {
-					err = err3
-				}
-			} else if err == nil {
-				err = err2
+		if !tryLeaveMemberByOtherPods {
+			err2 := lorryCli.LeaveMember(r.reqCtx.Ctx, nil)
+			if err2 != nil {
+				r.reqCtx.Log.Info(fmt.Sprintf("leaving pod %s by lorry, err occurs when LeaveMember: %v, try to leave member by other pods", pod.Name, err2.Error()))
+				tryLeaveMemberByOtherPods = true
 			}
 		}
+		if tryLeaveMemberByOtherPods {
+			if err3 := r.leaveMemberByOtherPods(desiredPods, pod); err3 != nil {
+				r.reqCtx.Log.Error(err3, fmt.Sprintf("leaving pod %s by other pods", pod.Name))
+				err = fmt.Errorf("leaving pod %s by other pods: %v", pod.Name, err3.Error())
+			}
+		}
+
 	}
 	return err // TODO: use requeue-after
 }
 
-func unableToConnect(err error) bool {
-	if err == nil {
-		return false
-	}
-	if strings.Contains(err.Error(), "i/o timeout") {
-		return true
-	}
-	return false
-}
-
 // Try to leave `podToLeave` by pods in `desiredPods`,
-// if any error occurs not due to `unableToConnect` to pods in `desiredPods`, return it immediately.
+// return only if success or all pods are iterated.
 func (r *componentWorkloadOps) leaveMemberByOtherPods(desiredPods []*corev1.Pod, podToLeave *corev1.Pod) error {
 	parameters := make(map[string]any)
 	parameters["podName"] = podToLeave.Spec.Hostname
 
+	errMessage := fmt.Sprintf("leaveMemberByOtherPods to evict pod %v: ", podToLeave)
+	success := false
+
 	for _, pod := range desiredPods {
 		lorryCli, err1 := lorry.NewClient(*pod)
 		if err1 != nil {
-			return fmt.Errorf("error when leaveMemberByOtherPods NewClient pod %v: %v", pod.Name, err1)
+			errMessage += fmt.Sprintf("can not create lorry client for pod %s, err: %v; ", pod.Name, err1)
+			continue
 		}
 
 		if intctrlutil.IsNil(lorryCli) {
-			// no lorry in the pod
 			continue
 		}
 
 		if err2 := lorryCli.LeaveMember(r.reqCtx.Ctx, parameters); err2 != nil {
-			// For the purpose of upgrade compatibility, if the version of Lorry is 0.7 and
-			// the version of KB is upgraded to 0.8 or newer, lorry client will return an NotImplemented error,
-			// in this case, here just ignore it.
-			if err2 == lorry.NotImplemented {
-				r.reqCtx.Log.Info("lorry leave member api is not implemented")
-			} else if unableToConnect(err2) {
-				r.reqCtx.Log.Info(fmt.Sprintf("leaveMemberByOtherPods: can not connect lorry on pod %s", pod.Name))
-			} else {
-				return fmt.Errorf("error when leaveMemberByOtherPods LeaveMember, try to leave pod %v on pod %v: %v", podToLeave.Name, pod.Name, err2)
-			}
+			errMessage += fmt.Sprintf("pod %s LeaveMember failed, err: %v; ", pod.Name, err2)
 		}
+		success = true
+		break
+	}
+
+	if success {
+		r.reqCtx.Log.Info(errMessage + "but finally succeeded!")
 		return nil
 	}
-	return fmt.Errorf("leaveMemberByOtherPods: try to leave pod %v by other pods fail", podToLeave.Name)
+	return errors.New(errMessage)
 }
 
 func (r *componentWorkloadOps) deletePVCs4ScaleIn(itsObj *workloads.InstanceSet) error {
