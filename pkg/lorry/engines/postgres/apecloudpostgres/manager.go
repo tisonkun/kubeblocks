@@ -314,19 +314,20 @@ func (mgr *Manager) JoinCurrentMemberToCluster(ctx context.Context, cluster *dcs
 func (mgr *Manager) LeaveMemberFromCluster(ctx context.Context, cluster *dcs.Cluster, memberName string) error {
 	addr := mgr.GetMemberAddrWithName(ctx, cluster, memberName)
 	if addr == "" {
-		mgr.Logger.Info(fmt.Sprintf("member %s already deleted", memberName))
+		mgr.Logger.Info(fmt.Sprintf("member %s not found or already deleted", memberName))
 		return nil
 	}
 
 	var port int
 	var err error
-	if memberName != mgr.CurrentMemberName {
-		port, err = strconv.Atoi(cluster.GetMemberWithName(memberName).DBPort)
-		if err != nil {
-			mgr.Logger.Error(err, fmt.Sprintf("get member %v port failed", memberName))
-		}
-	} else {
-		port = mgr.Config.GetDBPort()
+	mem := cluster.GetMemberWithName(memberName)
+	if mem == nil {
+		mgr.Logger.Info(fmt.Sprintf("member %s not found or already deleted", memberName))
+		return nil
+	}
+	port, err = strconv.Atoi(mem.DBPort)
+	if err != nil {
+		mgr.Logger.Error(err, fmt.Sprintf("get member %v port failed", memberName))
 	}
 
 	sql := fmt.Sprintf(`alter system consensus drop follower '%s:%d';`, addr, port)
