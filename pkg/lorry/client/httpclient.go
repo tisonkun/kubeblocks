@@ -154,14 +154,15 @@ func (cli *HTTPClient) Request(ctx context.Context, operation, method string, re
 		return nil, err
 	}
 
+	errPrefix := "err from lorry server: "
 	switch resp.StatusCode {
 	case http.StatusOK, http.StatusUnavailableForLegalReasons:
 		result, err := parseBody(resp.Body)
 		if err != nil {
-			return nil, err
+			return nil, errors.New(errPrefix + err.Error())
 		}
 		if event, ok := result["event"]; ok && event.(string) == "NotImplemented" {
-			return nil, NotImplemented
+			return nil, errors.New(errPrefix + NotImplemented.Error())
 		}
 		return result, nil
 
@@ -172,9 +173,9 @@ func (cli *HTTPClient) Request(ctx context.Context, operation, method string, re
 	default:
 		msg, err := io.ReadAll(resp.Body)
 		if err != nil {
-			return nil, err
+			return nil, errors.New(errPrefix + err.Error())
 		}
-		return nil, fmt.Errorf(string(msg))
+		return nil, errors.New(errPrefix + string(msg))
 	}
 }
 
