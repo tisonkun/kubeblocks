@@ -661,7 +661,7 @@ func (r *componentWorkloadOps) leaveMember4ScaleIn() error {
 
 		if !tryLeaveMemberByOtherPods {
 			err2 := lorryCli.LeaveMember(r.reqCtx.Ctx, nil)
-			if !strings.HasPrefix(err2.Error(), "err from lorry server:") {
+			if err2 != nil && !strings.HasPrefix(err2.Error(), "err from lorry server:") {
 				r.reqCtx.Log.Info(fmt.Sprintf("leaving pod %s by lorry, err occurs when LeaveMember: %v, try to leave member by other pods", pod.Name, err2.Error()))
 				tryLeaveMemberByOtherPods = true
 			}
