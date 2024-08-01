@@ -21,15 +21,10 @@ package apps
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"github.com/apecloud/kubeblocks/pkg/controller/instanceset"
 	"reflect"
 	"strings"
-
-	"github.com/apecloud/kubeblocks/pkg/lorry/httpserver"
-
-	"github.com/pkg/errors"
 
 	"github.com/spf13/viper"
 	"golang.org/x/exp/maps"
@@ -689,94 +684,94 @@ func (r *componentWorkloadOps) leaveMember4ScaleIn() error {
 	return err // TODO: use requeue-after
 }
 
-func IsErrorComeFromLorryServer(err error) bool {
-	errResp := httpserver.ErrorResponse{}
-	// the error code is written in OperationWrapper
-	if errUnmarshall := json.Unmarshal([]byte(err.Error()), &errResp); errUnmarshall == nil {
-		if errResp.ErrorCode == "ERR_MALFORMED_REQUEST" ||
-			errResp.ErrorCode == "ERR_MALFORMED_REQUEST_DATA" ||
-			errResp.ErrorCode == "ERR_PRECHECK_FAILED" ||
-			errResp.ErrorCode == "ERR_OPERATION_FAILED" {
-			return true
-		}
-	}
-	return false
-}
+//func IsErrorComeFromLorryServer(err error) bool {
+//	errResp := httpserver.ErrorResponse{}
+//	// the error code is written in OperationWrapper
+//	if errUnmarshall := json.Unmarshal([]byte(err.Error()), &errResp); errUnmarshall == nil {
+//		if errResp.ErrorCode == "ERR_MALFORMED_REQUEST" ||
+//			errResp.ErrorCode == "ERR_MALFORMED_REQUEST_DATA" ||
+//			errResp.ErrorCode == "ERR_PRECHECK_FAILED" ||
+//			errResp.ErrorCode == "ERR_OPERATION_FAILED" {
+//			return true
+//		}
+//	}
+//	return false
+//}
 
-func shouldSkipLeaveByOtherPod(err error) bool {
-	// For the purpose of upgrade compatibility, if the version of Lorry is 0.7 and
-	// the version of KB is upgraded to 0.8 or newer, lorry client will return an NotImplemented error,
-	// in this case, here just ignore it.
-	if errors.Is(err, lorry.NotImplemented) {
-		return true
-	}
+//func shouldSkipLeaveByOtherPod(err error) bool {
+//	// For the purpose of upgrade compatibility, if the version of Lorry is 0.7 and
+//	// the version of KB is upgraded to 0.8 or newer, lorry client will return an NotImplemented error,
+//	// in this case, here just ignore it.
+//	if errors.Is(err, lorry.NotImplemented) {
+//		return true
+//	}
+//
+//	// If the error comes from lorry server,
+//	// which means we can connect to the lorry server,
+//	// we just try again by the same pod in the next reconcile loop
+//	if IsErrorComeFromLorryServer(err) {
+//		return true
+//	}
+//
+//	return false
+//}
 
-	// If the error comes from lorry server,
-	// which means we can connect to the lorry server,
-	// we just try again by the same pod in the next reconcile loop
-	if IsErrorComeFromLorryServer(err) {
-		return true
-	}
-
-	return false
-}
-
-func (r *componentWorkloadOps) handleLorryLeaveMemberError(err error, desiredPods []*corev1.Pod, podToLeave *corev1.Pod) error {
-	if shouldSkipLeaveByOtherPod(err) {
-		return err
-	}
-
-	// from now on, it means the error is not from the lorry server,
-	// which means we can't connect to the lorry server,
-	// we should try to leave member by other pods
-	r.reqCtx.Log.Info(fmt.Sprintf("leaving pod %s by lorry, err occurs when LeaveMember: %v, try to leave member by other pods", podToLeave.Name, err.Error()))
-	if errLeaveByOtherPods := r.leaveMemberByOtherPods(desiredPods, podToLeave); errLeaveByOtherPods != nil {
-		r.reqCtx.Log.Error(errLeaveByOtherPods, fmt.Sprintf("leaving pod %s by other pods", podToLeave.Name))
-		return fmt.Errorf("leaving pod %s by other pods: %v", podToLeave.Name, errLeaveByOtherPods.Error())
-	}
-	return nil
-}
+//func (r *componentWorkloadOps) handleLorryLeaveMemberError(err error, desiredPods []*corev1.Pod, podToLeave *corev1.Pod) error {
+//	if shouldSkipLeaveByOtherPod(err) {
+//		return err
+//	}
+//
+//	// from now on, it means the error is not from the lorry server,
+//	// which means we can't connect to the lorry server,
+//	// we should try to leave member by other pods
+//	r.reqCtx.Log.Info(fmt.Sprintf("leaving pod %s by lorry, err occurs when LeaveMember: %v, try to leave member by other pods", podToLeave.Name, err.Error()))
+//	if errLeaveByOtherPods := r.leaveMemberByOtherPods(desiredPods, podToLeave); errLeaveByOtherPods != nil {
+//		r.reqCtx.Log.Error(errLeaveByOtherPods, fmt.Sprintf("leaving pod %s by other pods", podToLeave.Name))
+//		return fmt.Errorf("leaving pod %s by other pods: %v", podToLeave.Name, errLeaveByOtherPods.Error())
+//	}
+//	return nil
+//}
 
 // Try to leave `podToLeave` by pods in `desiredPods`,
 // return only if success or all pods are iterated.
-func (r *componentWorkloadOps) leaveMemberByOtherPods(desiredPods []*corev1.Pod, podToLeave *corev1.Pod) error {
-	parameters := make(map[string]any)
-	parameters["podName"] = podToLeave.Spec.Hostname
-
-	// record the error message of lorry request by every pod
-	errMessage := fmt.Sprintf("leaveMemberByOtherPods to evict pod %v: ", podToLeave)
-	success := false
-
-	for _, pod := range desiredPods {
-		lorryCli, err1 := lorry.NewClient(*pod)
-		if err1 != nil {
-			errMessage += fmt.Sprintf("can not create lorry client for pod %s, err: %v; ", pod.Name, err1)
-			continue
-		}
-
-		if intctrlutil.IsNil(lorryCli) {
-			errMessage += fmt.Sprintf("lorry client is nil for pod %s; ", pod.Name)
-			continue
-		}
-
-		if err2 := lorryCli.LeaveMember(r.reqCtx.Ctx, parameters); err2 != nil {
-			errMessage += fmt.Sprintf("pod %s LeaveMember failed, err: %v; ", pod.Name, err2)
-			if shouldSkipLeaveByOtherPod(err2) {
-				break
-			}
-			continue
-		}
-		success = true
-		break
-	}
-
-	// if success, only log the error message, otherwise return the error
-	if success {
-		r.reqCtx.Log.Info(errMessage + "but finally succeeded!")
-		return nil
-	}
-	return errors.New(errMessage)
-}
+//func (r *componentWorkloadOps) leaveMemberByOtherPods(desiredPods []*corev1.Pod, podToLeave *corev1.Pod) error {
+//	parameters := make(map[string]any)
+//	parameters["podName"] = podToLeave.Spec.Hostname
+//
+//	// record the error message of lorry request by every pod
+//	errMessage := fmt.Sprintf("leaveMemberByOtherPods to evict pod %v: ", podToLeave)
+//	success := false
+//
+//	for _, pod := range desiredPods {
+//		lorryCli, err1 := lorry.NewClient(*pod)
+//		if err1 != nil {
+//			errMessage += fmt.Sprintf("can not create lorry client for pod %s, err: %v; ", pod.Name, err1)
+//			continue
+//		}
+//
+//		if intctrlutil.IsNil(lorryCli) {
+//			errMessage += fmt.Sprintf("lorry client is nil for pod %s; ", pod.Name)
+//			continue
+//		}
+//
+//		if err2 := lorryCli.LeaveMember(r.reqCtx.Ctx, parameters); err2 != nil {
+//			errMessage += fmt.Sprintf("pod %s LeaveMember failed, err: %v; ", pod.Name, err2)
+//			if shouldSkipLeaveByOtherPod(err2) {
+//				break
+//			}
+//			continue
+//		}
+//		success = true
+//		break
+//	}
+//
+//	// if success, only log the error message, otherwise return the error
+//	if success {
+//		r.reqCtx.Log.Info(errMessage + "but finally succeeded!")
+//		return nil
+//	}
+//	return errors.New(errMessage)
+//}
 
 func (r *componentWorkloadOps) deletePVCs4ScaleIn(itsObj *workloads.InstanceSet) error {
 	graphCli := model.NewGraphClient(r.cli)
