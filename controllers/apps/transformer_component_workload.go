@@ -634,7 +634,7 @@ func (r *componentWorkloadOps) leaveMember4ScaleIn() error {
 		}
 		podsToMemberLeave = append(podsToMemberLeave, pod)
 	}
-	tryLeaveMemberByOtherPods := false
+
 	for _, pod := range podsToMemberLeave {
 		if !(isLeader(pod) || // if the pod is leader, it needs to call switchover
 			(r.synthesizeComp.LifecycleActions != nil && r.synthesizeComp.LifecycleActions.MemberLeave != nil)) { // if the memberLeave action is defined, it needs to call it
@@ -649,9 +649,14 @@ func (r *componentWorkloadOps) leaveMember4ScaleIn() error {
 				return err1
 			}
 
-			// use other pods to leave member
-			tryLeaveMemberByOtherPods = true
+			// because we can't create lorry client,
+			// so we should try to leave member by other pods
 			r.reqCtx.Log.Info(fmt.Sprintf("leaving pod %s by lorry, err occurs when NewClient: %v, try to leave member by other pods", pod.Name, err1.Error()))
+			if errLeaveByOtherPods := r.leaveMemberByOtherPods(desiredPods, pod); errLeaveByOtherPods != nil {
+				r.reqCtx.Log.Error(errLeaveByOtherPods, fmt.Sprintf("leaving pod %s by other pods", pod.Name))
+				err = errLeaveByOtherPods
+			}
+			continue
 		}
 
 		// switchover if the leaving pod is leader
@@ -659,22 +664,33 @@ func (r *componentWorkloadOps) leaveMember4ScaleIn() error {
 			return switchoverErr
 		}
 
-		if !tryLeaveMemberByOtherPods {
-			err2 := lorryCli.LeaveMember(r.reqCtx.Ctx, nil)
-			if err2 != nil && !strings.HasPrefix(err2.Error(), "err from lorry server:") {
-				r.reqCtx.Log.Info(fmt.Sprintf("leaving pod %s by lorry, err occurs when LeaveMember: %v, try to leave member by other pods", pod.Name, err2.Error()))
-				tryLeaveMemberByOtherPods = true
+		err2 := lorryCli.LeaveMember(r.reqCtx.Ctx, nil)
+		if err2 != nil {
+			err3 := r.handleLorryLeaveMemberError(err2, desiredPods, pod)
+			if err3 != nil {
+				err = err3
 			}
 		}
-		if tryLeaveMemberByOtherPods {
-			if err3 := r.leaveMemberByOtherPods(desiredPods, pod); err3 != nil {
-				r.reqCtx.Log.Error(err3, fmt.Sprintf("leaving pod %s by other pods", pod.Name))
-				err = fmt.Errorf("leaving pod %s by other pods: %v", pod.Name, err3.Error())
-			}
-		}
-
 	}
 	return err // TODO: use requeue-after
+}
+
+func (r *componentWorkloadOps) handleLorryLeaveMemberError(err error, desiredPods []*corev1.Pod, podToLeave *corev1.Pod) error {
+	// if the error start with lorry.ErrPrefix, it represents the error comes from lorry server,
+	// which means we can connect to the lorry server, as a result,
+	// we just record the error and try again in the next reconcile loop
+	if strings.HasPrefix(err.Error(), lorry.ErrPrefix) {
+		return err
+	}
+
+	// from now on, it means the error is not from the lorry server,
+	// we should try to leave member by other pods
+	r.reqCtx.Log.Info(fmt.Sprintf("leaving pod %s by lorry, err occurs when LeaveMember: %v, try to leave member by other pods", podToLeave.Name, err.Error()))
+	if errLeaveByOtherPods := r.leaveMemberByOtherPods(desiredPods, podToLeave); errLeaveByOtherPods != nil {
+		r.reqCtx.Log.Error(errLeaveByOtherPods, fmt.Sprintf("leaving pod %s by other pods", podToLeave.Name))
+		return fmt.Errorf("leaving pod %s by other pods: %v", podToLeave.Name, errLeaveByOtherPods.Error())
+	}
+	return nil
 }
 
 // Try to leave `podToLeave` by pods in `desiredPods`,
@@ -683,6 +699,7 @@ func (r *componentWorkloadOps) leaveMemberByOtherPods(desiredPods []*corev1.Pod,
 	parameters := make(map[string]any)
 	parameters["podName"] = podToLeave.Spec.Hostname
 
+	// record the error message of lorry request by every pod
 	errMessage := fmt.Sprintf("leaveMemberByOtherPods to evict pod %v: ", podToLeave)
 	success := false
 
@@ -694,6 +711,7 @@ func (r *componentWorkloadOps) leaveMemberByOtherPods(desiredPods []*corev1.Pod,
 		}
 
 		if intctrlutil.IsNil(lorryCli) {
+			errMessage += fmt.Sprintf("lorry client is nil for pod %s; ", pod.Name)
 			continue
 		}
 
@@ -704,6 +722,7 @@ func (r *componentWorkloadOps) leaveMemberByOtherPods(desiredPods []*corev1.Pod,
 		break
 	}
 
+	// if success, only log the error message, otherwise return the error
 	if success {
 		r.reqCtx.Log.Info(errMessage + "but finally succeeded!")
 		return nil
