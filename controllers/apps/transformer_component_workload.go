@@ -23,9 +23,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/apecloud/kubeblocks/pkg/lorry/httpserver"
 	"reflect"
 	"strings"
+
+	"github.com/apecloud/kubeblocks/pkg/lorry/httpserver"
 
 	"github.com/pkg/errors"
 
@@ -677,27 +678,45 @@ func (r *componentWorkloadOps) leaveMember4ScaleIn() error {
 	return err // TODO: use requeue-after
 }
 
-func (r *componentWorkloadOps) handleLorryLeaveMemberError(err error, desiredPods []*corev1.Pod, podToLeave *corev1.Pod) error {
+func IsErrorComeFromLorryServer(err error) bool {
+	errResp := httpserver.ErrorResponse{}
+	// the error code is written in OperationWrapper
+	if errUnmarshall := json.Unmarshal([]byte(err.Error()), &errResp); errUnmarshall == nil {
+		if errResp.ErrorCode == "ERR_MALFORMED_REQUEST" ||
+			errResp.ErrorCode == "ERR_MALFORMED_REQUEST_DATA" ||
+			errResp.ErrorCode == "ERR_PRECHECK_FAILED" ||
+			errResp.ErrorCode == "ERR_OPERATION_FAILED" {
+			return true
+		}
+	}
+	return false
+}
+
+func shouldSkipLeaveByOtherPod(err error) bool {
 	// For the purpose of upgrade compatibility, if the version of Lorry is 0.7 and
 	// the version of KB is upgraded to 0.8 or newer, lorry client will return an NotImplemented error,
 	// in this case, here just ignore it.
 	if errors.Is(err, lorry.NotImplemented) {
-		r.reqCtx.Log.Info("lorry leave member api is not implemented")
+		return true
+	}
+
+	// If the error comes from lorry server,
+	// which means we can connect to the lorry server,
+	// we just try again by the same pod in the next reconcile loop
+	if IsErrorComeFromLorryServer(err) {
+		return true
+	}
+
+	return false
+}
+
+func (r *componentWorkloadOps) handleLorryLeaveMemberError(err error, desiredPods []*corev1.Pod, podToLeave *corev1.Pod) error {
+	if shouldSkipLeaveByOtherPod(err) {
 		return err
 	}
 
-	errResp := httpserver.ErrorResponse{}
-	if errUnmarshall := json.Unmarshal([]byte(err.Error()), &errResp); errUnmarshall == nil {
-		// if the errResp is correctly unmarshall and error code is not empty,
-		// it represents the error comes from lorry server,
-		// which means we can connect to the lorry server, as a result,
-		// we just record the error and try again in the next reconcile loop
-		if errResp.ErrorCode != "" {
-			return err
-		}
-	}
-
 	// from now on, it means the error is not from the lorry server,
+	// which means we can't connect to the lorry server,
 	// we should try to leave member by other pods
 	r.reqCtx.Log.Info(fmt.Sprintf("leaving pod %s by lorry, err occurs when LeaveMember: %v, try to leave member by other pods", podToLeave.Name, err.Error()))
 	if errLeaveByOtherPods := r.leaveMemberByOtherPods(desiredPods, podToLeave); errLeaveByOtherPods != nil {
@@ -731,6 +750,9 @@ func (r *componentWorkloadOps) leaveMemberByOtherPods(desiredPods []*corev1.Pod,
 
 		if err2 := lorryCli.LeaveMember(r.reqCtx.Ctx, parameters); err2 != nil {
 			errMessage += fmt.Sprintf("pod %s LeaveMember failed, err: %v; ", pod.Name, err2)
+			if shouldSkipLeaveByOtherPod(err2) {
+				break
+			}
 			continue
 		}
 		success = true
