@@ -133,8 +133,6 @@ func NewHTTPClientWithURL(url string) (*HTTPClient, error) {
 	return operationClient, nil
 }
 
-var ErrPrefix = "err from lorry server: "
-
 func (cli *HTTPClient) Request(ctx context.Context, operation, method string, req map[string]any) (map[string]any, error) {
 	ctxWithReconcileTimeout, cancel := context.WithTimeout(ctx, cli.ReconcileTimeout)
 	defer cancel()
@@ -160,10 +158,10 @@ func (cli *HTTPClient) Request(ctx context.Context, operation, method string, re
 	case http.StatusOK, http.StatusUnavailableForLegalReasons:
 		result, err := parseBody(resp.Body)
 		if err != nil {
-			return nil, errors.New(ErrPrefix + err.Error())
+			return nil, err
 		}
 		if event, ok := result["event"]; ok && event.(string) == "NotImplemented" {
-			return nil, errors.New(ErrPrefix + NotImplemented.Error())
+			return nil, NotImplemented
 		}
 		return result, nil
 
@@ -174,9 +172,9 @@ func (cli *HTTPClient) Request(ctx context.Context, operation, method string, re
 	default:
 		msg, err := io.ReadAll(resp.Body)
 		if err != nil {
-			return nil, errors.New(ErrPrefix + err.Error())
+			return nil, err
 		}
-		return nil, errors.New(ErrPrefix + string(msg))
+		return nil, fmt.Errorf(string(msg))
 	}
 }
 

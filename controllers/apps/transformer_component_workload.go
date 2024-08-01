@@ -21,7 +21,9 @@ package apps
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"github.com/apecloud/kubeblocks/pkg/lorry/httpserver"
 	"reflect"
 	"strings"
 
@@ -676,11 +678,23 @@ func (r *componentWorkloadOps) leaveMember4ScaleIn() error {
 }
 
 func (r *componentWorkloadOps) handleLorryLeaveMemberError(err error, desiredPods []*corev1.Pod, podToLeave *corev1.Pod) error {
-	// if the error start with lorry.ErrPrefix, it represents the error comes from lorry server,
-	// which means we can connect to the lorry server, as a result,
-	// we just record the error and try again in the next reconcile loop
-	if strings.HasPrefix(err.Error(), lorry.ErrPrefix) {
+	// For the purpose of upgrade compatibility, if the version of Lorry is 0.7 and
+	// the version of KB is upgraded to 0.8 or newer, lorry client will return an NotImplemented error,
+	// in this case, here just ignore it.
+	if errors.Is(err, lorry.NotImplemented) {
+		r.reqCtx.Log.Info("lorry leave member api is not implemented")
 		return err
+	}
+
+	errResp := httpserver.ErrorResponse{}
+	if errUnmarshall := json.Unmarshal([]byte(err.Error()), &errResp); errUnmarshall == nil {
+		// if the errResp is correctly unmarshall and error code is not empty,
+		// it represents the error comes from lorry server,
+		// which means we can connect to the lorry server, as a result,
+		// we just record the error and try again in the next reconcile loop
+		if errResp.ErrorCode != "" {
+			return err
+		}
 	}
 
 	// from now on, it means the error is not from the lorry server,
@@ -717,6 +731,7 @@ func (r *componentWorkloadOps) leaveMemberByOtherPods(desiredPods []*corev1.Pod,
 
 		if err2 := lorryCli.LeaveMember(r.reqCtx.Ctx, parameters); err2 != nil {
 			errMessage += fmt.Sprintf("pod %s LeaveMember failed, err: %v; ", pod.Name, err2)
+			continue
 		}
 		success = true
 		break
