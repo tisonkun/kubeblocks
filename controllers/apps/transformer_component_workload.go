@@ -579,6 +579,16 @@ func (r *componentWorkloadOps) scaleOut(itsObj *workloads.InstanceSet) error {
 	}
 }
 
+func getHealthyLorryClient(pods []*corev1.Pod) (lorry.Client, error) {
+	for _, pod := range pods {
+		lorryCli, err := lorry.NewClient(*pod)
+		if err == nil && !intctrlutil.IsNil(lorryCli) {
+			return lorryCli, nil
+		}
+	}
+	return nil, fmt.Errorf("no health lorry client found")
+}
+
 func (r *componentWorkloadOps) leaveMember4ScaleIn() error {
 	pods, err := component.ListOwnedPods(r.reqCtx.Ctx, r.cli, r.cluster.Namespace, r.cluster.Name, r.synthesizeComp.Name)
 	if err != nil {
@@ -628,50 +638,48 @@ func (r *componentWorkloadOps) leaveMember4ScaleIn() error {
 
 	// TODO: Move memberLeave to the ITS controller. Instead of performing a switchover, we can directly scale down the non-leader nodes. This is because the pod ordinal is not guaranteed to be continuous.
 	podsToMemberLeave := make([]*corev1.Pod, 0)
-	desiredPods := make([]*corev1.Pod, 0)
 	for _, pod := range pods {
 		// if the pod not exists in the generated pod names, it should be a member that needs to leave
 		if _, ok := r.desiredCompPodNameSet[pod.Name]; ok {
-			desiredPods = append(desiredPods, pod)
 			continue
 		}
 		podsToMemberLeave = append(podsToMemberLeave, pod)
 	}
 
 	for _, pod := range podsToMemberLeave {
-		if !(isLeader(pod) || // if the pod is leader, it needs to call switchover
-			(r.synthesizeComp.LifecycleActions != nil && r.synthesizeComp.LifecycleActions.MemberLeave != nil)) { // if the memberLeave action is defined, it needs to call it
-			continue
-		}
-
 		lorryCli, err1 := lorry.NewClient(*pod)
 		if err1 != nil || intctrlutil.IsNil(lorryCli) {
-			// if the pod is leader, but the lorry client can't be created,
-			// it means we can't switch over, so we return the error right here
-			if isLeader(pod) {
-				return err1
+			lorryCli, err1 = getHealthyLorryClient(pods)
+			if err1 != nil {
+				if err == nil {
+					err = err1
+				}
+				continue
 			}
+		}
 
-			// because we can't create lorry client,
-			// so we should try to leave member by other pods
-			r.reqCtx.Log.Info(fmt.Sprintf("leaving pod %s by lorry, err occurs when NewClient: %v, try to leave member by other pods", pod.Name, err1.Error()))
-			if errLeaveByOtherPods := r.leaveMemberByOtherPods(desiredPods, pod); errLeaveByOtherPods != nil {
-				r.reqCtx.Log.Error(errLeaveByOtherPods, fmt.Sprintf("leaving pod %s by other pods", pod.Name))
-				err = errLeaveByOtherPods
+		if isLeader(pod) {
+			// switchover if the leaving pod is leader
+			if switchoverErr := tryToSwitchover(lorryCli, pod); switchoverErr != nil {
+				return switchoverErr
 			}
+		}
+
+		if r.synthesizeComp.LifecycleActions == nil || r.synthesizeComp.LifecycleActions.MemberLeave == nil {
 			continue
 		}
 
-		// switchover if the leaving pod is leader
-		if switchoverErr := tryToSwitchover(lorryCli, pod); switchoverErr != nil {
-			return switchoverErr
-		}
-
-		err2 := lorryCli.LeaveMember(r.reqCtx.Ctx, nil)
+		parameters := make(map[string]any)
+		parameters["podName"] = pod.Spec.Hostname
+		err2 := lorryCli.LeaveMember(r.reqCtx.Ctx, parameters)
 		if err2 != nil {
-			err3 := r.handleLorryLeaveMemberError(err2, desiredPods, pod)
-			if err3 != nil {
-				err = err3
+			// For the purpose of upgrade compatibility, if the version of Lorry is 0.7 and
+			// the version of KB is upgraded to 0.8 or newer, lorry client will return an NotImplemented error,
+			// in this case, here just ignore it.
+			if err2 == lorry.NotImplemented {
+				r.reqCtx.Log.Info("lorry leave member api is not implemented")
+			} else if err == nil {
+				err = err2
 			}
 		}
 	}
