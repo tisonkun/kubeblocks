@@ -27,7 +27,6 @@ import (
 	"github.com/sethvargo/go-password/password"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/pointer"
@@ -72,22 +71,22 @@ func (o DataScriptOpsHandler) Action(reqCtx intctrlutil.RequestCtx, cli client.C
 		// we have checked component exists in validation, so this should not happen
 		return intctrlutil.NewFatalError(fmt.Sprintf("component %s not found in cluster %s", spec.ComponentName, cluster.Name))
 	}
+	return intctrlutil.NewFatalError("not supported")
 
-	clusterDef, err := getClusterDefByName(reqCtx.Ctx, cli, cluster.Spec.ClusterDefRef)
-	if err != nil {
-		if apierrors.IsNotFound(err) {
-			// fail fast if cluster def does not exists
-			return intctrlutil.NewFatalError(err.Error())
-		}
-		return err
-	}
+	// clusterDef, err := getClusterDefByName(reqCtx.Ctx, cli, cluster.Spec.ClusterDefRef)
+	// if err != nil {
+	//	if apierrors.IsNotFound(err) {
+	//		// fail fast if cluster def does not exists
+	//		return intctrlutil.NewFatalError(err.Error())
+	//	}
+	//	return err
+	// }
 	// TODO(v1.0): how to?
 	//// get componentDef
 	// componentDef := clusterDef.GetComponentDefByName(component.ComponentDefRef)
 	// if componentDef == nil {
 	//	return intctrlutil.NewFatalError(fmt.Sprintf("componentDef %s not found in clusterDef %s", component.ComponentDefRef, clusterDef.Name))
 	// }
-	return intctrlutil.NewFatalError(fmt.Sprintf("componentDef %s not found in clusterDef %s", component.ComponentDefRef, clusterDef.Name))
 
 	//// create jobs
 	// var jobs []*batchv1.Job

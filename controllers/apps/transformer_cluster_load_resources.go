@@ -64,10 +64,11 @@ func (t *clusterLoadRefResourcesTransformer) Transform(ctx graph.TransformContex
 }
 
 func (t *clusterLoadRefResourcesTransformer) apiValidation(cluster *appsv1alpha1.Cluster) error {
+	if withClusterLegacyCompDefinition(cluster) {
+		return fmt.Errorf("cluster API validate error, legacy component definition not supported")
+	}
 	if withClusterTopology(cluster) ||
-		withClusterUserDefined(cluster) ||
-		withClusterLegacyDefinition(cluster) ||
-		withClusterSimplifiedAPI(cluster) {
+		withClusterUserDefined(cluster) {
 		return nil
 	}
 	return fmt.Errorf("cluster API validate error, clusterDef: %s, topology: %s, comps: %d, legacy comps: %d, simplified API: %v",
@@ -143,6 +144,15 @@ func withClusterSimplifiedAPI(cluster *appsv1alpha1.Cluster) bool {
 		cluster.Spec.Network != nil ||
 		len(cluster.Spec.Tenancy) > 0 ||
 		len(cluster.Spec.AvailabilityPolicy) > 0
+}
+
+func withClusterLegacyCompDefinition(cluster *appsv1alpha1.Cluster) bool {
+	for _, comp := range cluster.Spec.ComponentSpecs {
+		if len(comp.ComponentDefRef) > 0 {
+			return true
+		}
+	}
+	return withClusterSimplifiedAPI(cluster)
 }
 
 func clusterCompCnt(cluster *appsv1alpha1.Cluster) int {
