@@ -6762,7 +6762,7 @@ Action
 at which the action should trigger: <code>Immediately</code>, <code>RuntimeReady</code>, <code>ComponentReady</code>, and <code>ClusterReady</code>.
 with <code>ComponentReady</code> being the default.</p>
 <p>The PostProvision Action is intended to run only once.</p>
-<p>The container executing this action has access to following environment variables:</p>
+<p>The container executing this action has access to following variables:</p>
 <ul>
 <li><p>KB_CLUSTER_POD_IP_LIST: Comma-separated list of the cluster&rsquo;s pod IP addresses (e.g., &ldquo;podIp1,podIp2&rdquo;).</p></li>
 <li><p>KB_CLUSTER_POD_NAME_LIST: Comma-separated list of the cluster&rsquo;s pod names (e.g., &ldquo;pod1,pod2&rdquo;).</p></li>
@@ -6803,7 +6803,7 @@ Action
 <p>This action is executed immediately when a scale-down operation for the Component is initiated.
 The actual termination and cleanup of the Component and its associated resources will not proceed
 until the PreTerminate action has completed successfully.</p>
-<p>The container executing this action has access to following environment variables:</p>
+<p>The container executing this action has access to following variables:</p>
 <ul>
 <li><p>KB_CLUSTER_POD_IP_LIST: Comma-separated list of the cluster&rsquo;s pod IP addresses (e.g., &ldquo;podIp1,podIp2&rdquo;).</p></li>
 <li><p>KB_CLUSTER_POD_NAME_LIST: Comma-separated list of the cluster&rsquo;s pod names (e.g., &ldquo;pod1,pod2&rdquo;).</p></li>

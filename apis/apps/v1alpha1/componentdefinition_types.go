@@ -929,7 +929,7 @@ type ComponentLifecycleActions struct {
 	//
 	// The PostProvision Action is intended to run only once.
 	//
-	// The container executing this action has access to following environment variables:
+	// The container executing this action has access to following variables:
 	//
 	// - KB_CLUSTER_POD_IP_LIST: Comma-separated list of the cluster's pod IP addresses (e.g., "podIp1,podIp2").
 	// - KB_CLUSTER_POD_NAME_LIST: Comma-separated list of the cluster's pod names (e.g., "pod1,pod2").
@@ -966,7 +966,7 @@ type ComponentLifecycleActions struct {
 	// The actual termination and cleanup of the Component and its associated resources will not proceed
 	// until the PreTerminate action has completed successfully.
 	//
-	// The container executing this action has access to following environment variables:
+	// The container executing this action has access to following variables:
 	//
 	// - KB_CLUSTER_POD_IP_LIST: Comma-separated list of the cluster's pod IP addresses (e.g., "podIp1,podIp2").
 	// - KB_CLUSTER_POD_NAME_LIST: Comma-separated list of the cluster's pod names (e.g., "pod1,pod2").

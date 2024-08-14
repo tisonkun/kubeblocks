@@ -1840,7 +1840,7 @@ spec:
                       The PostProvision Action is intended to run only once.
 
 
-                      The container executing this action has access to following environment variables:
+                      The container executing this action has access to following variables:
 
 
                       - KB_CLUSTER_POD_IP_LIST: Comma-separated list of the cluster's pod IP addresses (e.g., "podIp1,podIp2").
@@ -2147,7 +2147,7 @@ spec:
                       until the PreTerminate action has completed successfully.
 
 
-                      The container executing this action has access to following environment variables:
+                      The container executing this action has access to following variables:
 
 
                       - KB_CLUSTER_POD_IP_LIST: Comma-separated list of the cluster's pod IP addresses (e.g., "podIp1,podIp2").
